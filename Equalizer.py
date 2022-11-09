@@ -10,7 +10,6 @@ import soundfile
 import pygame
 from itertools import count
 import pandas as pd
-import time
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import streamlit.components.v1 as components
