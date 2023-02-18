@@ -12,13 +12,10 @@ import pandas as pd
 import time
 import altair as alt
 import mpld3
-from matplotlib.animation import FuncAnimation
-
 
 
 #range of frequency domain of letters is (0-4000hz)
 st.set_page_config(page_title="Equalizer", page_icon=":headphones:",layout="wide")
- 
 
 if 'uploadedFile' not in st.session_state:
     st.session_state['uploadedFile']=None
@@ -30,7 +27,19 @@ if 'radio_check' not in st.session_state:
     st.session_state['radio_check']=0 
 
 if 'modified_data' not in st.session_state:
-    st.session_state['modified_data']=None  
+    st.session_state['modified_data']=None 
+
+if 'fourierValues' not in st.session_state:
+    st.session_state['fourierValues']=[]   
+          
+if 'size' not in st.session_state:
+    st.session_state['size']=0 
+
+if 'paused' not in st.session_state:
+    st.session_state['paused']=False 
+
+if 'play_original' not in st.session_state:
+    st.session_state['play_original']=False 
           
 
 hide_st_style = """
@@ -52,33 +61,42 @@ button_style = """
         """
 st.markdown(button_style, unsafe_allow_html=True)
 
-
 def plot_animation(df):
-    lines = alt.Chart(df).mark_line().encode(
-            x=alt.X("x_axis", axis=alt.Axis(title='Time')),
+    lines = alt.Chart(df).mark_trail().encode(
+            x=alt.X("x_axis", axis=alt.Axis(title='Time'),scale=alt.Scale(domain=(0,10))),
             y=alt.Y('y_axis', axis=alt.Axis(title='Magnitude')),
         ).properties(
-            width=900,
-            height=600
+            width=550,
+            height=150
         )
     return lines
-    
+
+
+def static(file):
+   df =file.iloc[0:st.session_state['size']]
+   lines = plot_animation(df)
+   st.altair_chart(lines) 
+
 def realtime(file):
     df =file
     lines = plot_animation(df)
     line_plot = st.altair_chart(lines)
     N = df.shape[0]
-    burst = 1      
-    size = burst    
-    for i in range(1, 980):
-        step_df = df.iloc[0:size]
+    if not st.session_state['paused']:      
+        st.session_state['size'] = 0    
+    for i in range(0, N):
+
+        step_df = df.iloc[0:st.session_state['size']]
         lines = plot_animation(step_df)
         line_plot = line_plot.altair_chart(lines)
-        size = i + burst
-        if size >= N:
-            size = N - 1
-        time.sleep(.000000001)
-    st.experimental_rerun()     
+        if st.session_state['size'] < N-1:
+            st.session_state['size'] =st.session_state['size'] + 1
+        else:
+            if pygame.mixer.get_init() is not None:
+                pygame.mixer.quit() 
+            st.session_state['paused']=False    
+        time.sleep(.001)
+    st.experimental_rerun()   
 
 def fourier_transform(x,sampleRate):
     fourierValue=fourier.rfft(x)
@@ -108,25 +126,33 @@ def add_new_uploaded_file ():
         st.session_state['frequency']=frequency
         st.session_state['maxFrequency']=int (sampleRate/2)
         st.session_state['sampleRate']=sampleRate
+        st.session_state['modified_wav_file']=None
+        st.session_state['paused']=False 
+        st.session_state['size'] = 0
+        if pygame.mixer.get_init() is not None:
+            pygame.mixer.quit() 
 
 def change_frequency(sliderNumber,amplituideValue,sliders_number):
     maxFrequency=st.session_state['maxFrequency'] 
     if sliders_number==10:   
         maxFrequencyRange=(math.ceil(sliderNumber*maxFrequency/10))
         minFrequencyRange=maxFrequencyRange-int(maxFrequency/10)
-    elif sliders_number==6: 
-        maxFrequencyRange=(math.ceil(sliderNumber*maxFrequency/10))
-        minFrequencyRange=maxFrequencyRange-int(maxFrequency/10)
-
+    elif sliders_number==4: 
+        if sliderNumber==1:
+            minFrequencyRange,maxFrequencyRange=500,2000   #ou
+        elif sliderNumber==2:
+            minFrequencyRange,maxFrequencyRange=2000,9000   #sh
+        elif sliderNumber==3:
+            minFrequencyRange,maxFrequencyRange=1200,5000   #z
+        elif sliderNumber==4:
+            minFrequencyRange,maxFrequencyRange=900,2800   #r
     else: 
         if sliderNumber==1:
-            minFrequencyRange,maxFrequencyRange=0,800
+            minFrequencyRange,maxFrequencyRange=0,1300
         elif sliderNumber==2:
-            minFrequencyRange,maxFrequencyRange=800,5000
+            minFrequencyRange,maxFrequencyRange=1300,2000
         elif sliderNumber==3:
-            minFrequencyRange,maxFrequencyRange=5000,20000
-        else:
-            minFrequencyRange,maxFrequencyRange=0,0
+            minFrequencyRange,maxFrequencyRange=2000,22050
             
     pointsPerFrequency=int (len(st.session_state['frequency'])/maxFrequency)
     frequencyRange=[minFrequencyRange*pointsPerFrequency,maxFrequencyRange*pointsPerFrequency]
@@ -134,27 +160,29 @@ def change_frequency(sliderNumber,amplituideValue,sliders_number):
     st.session_state.fourierValues[frequencyRange[0]:frequencyRange[1]]= dataCopy*(amplituideValue)  
 
 def control_music(control):
-    if st.session_state['uploadedFile'] is not None:
-        if control== "play": 
-            pygame.mixer.init()
-            if st.session_state['modified_wav_file']  is not None:
-                data=pd.DataFrame({'y_axis':st.session_state['modified_data'][::1800],'x_axis':st.session_state['time'][::1800]})
-                pygame.mixer.music.load(st.session_state['modified_wav_file'])
-                pygame.mixer.music.play()
-                realtime(data)
-             
-            else:
-                data=pd.DataFrame({'y_axis':st.session_state["dataArray"][::1800],'x_axis':st.session_state['time'][::1800]})
-                pygame.mixer.music.load(file) 
-                pygame.mixer.music.play()
-                realtime(data) 
-        
+       if st.session_state['uploadedFile'] is not None:
+        if (not st.session_state['play_original']) and (st.session_state['modified_wav_file'] is not None):
+            wav_file=st.session_state['modified_wav_file']
+            data=pd.DataFrame({'y_axis':st.session_state['modified_data'][::1800],'x_axis':st.session_state['time'][::1800]})
+        else:
+            wav_file=file
+            data=pd.DataFrame({'y_axis':st.session_state["dataArray"][::1800],'x_axis':st.session_state['time'][::1800]})
 
-        elif  pygame.mixer.get_init() is not None:
-            if control== "pause":
-                pygame.mixer.music.pause()
-            elif control=="resume":    
-                pygame.mixer.music.unpause()
+        if control== "play":
+            if pygame.mixer.get_init() is not None:
+              pygame.mixer.music.unpause() 
+            else:   
+                pygame.mixer.init()
+                pygame.mixer.music.load(wav_file)
+                pygame.mixer.music.play()
+            realtime(data)  
+
+        # elif  pygame.mixer.get_init() is not None:
+        elif control== "Stop":
+                if pygame.mixer.get_init() is not None:
+                    pygame.mixer.music.pause()
+                static(data)
+
 
 def maleFemaleChange():
     sampleRate =st.session_state.sampleRate
@@ -175,9 +203,9 @@ def make_sliders():
     
     sliders = {}
     if radio_check=="Vowels_Frequency":
-        sliders_number=6
-    elif radio_check== "Music_Instruments":
         sliders_number=4
+    elif radio_check== "Music_Instruments":
+        sliders_number=3
     elif radio_check=='Male-Female':
         maleFemaleChange()
         sliders_number=0
@@ -199,28 +227,39 @@ def make_sliders():
             else:
                 change_frequency(key,sliders[key],sliders_number)
 
-            st.caption(str((key-1)*int((st.session_state['maxFrequency']/10)))+"-"+str(int(key*st.session_state['maxFrequency']/10))+"Hz" )
+            if radio_check=="Frequency":
+                st.caption(str((key-1)*int((st.session_state['maxFrequency']/10)))+"-"+str(int(key*st.session_state['maxFrequency']/10))+"Hz" )
+            elif radio_check== "Music_Instruments":  
+                if key==1:
+                   st.caption("Drums/Piano")
+                elif key==2:
+                   st.caption("Flute")
+                elif key==3:
+                    st.caption("Cymbal")
 
 def play_buttons():
-        global spectroCheckBox,Apply
-        col1,col2=st.sidebar.columns([1,2])
-        with col2:
-            spectroCheckBox=st.checkbox('Spectrogram')
-            st.checkbox('signal time')
-
+        global play_original,Apply
+        col1,col2=st.sidebar.columns([1,1])
         if col1.button("Play"):
             control_music("play")  
-        if col1.button("Pause"): 
-            control_music("pause")   
-        if col1.button("Resume"):
-            control_music("resume")
-        Apply =col1.button("Apply")
+        else: 
+            control_music("Stop")
+
+        if col1.button("Stop"):
+            st.session_state['paused']=True    
+        
+        st.session_state['play_original']=col1.checkbox("Play Original",value=False)
+        # with col3:
+        #     spectroCheckBox=st.checkbox('Spectrogram')  
+        Apply =col2.button("Apply")
 
 def apply_action():
         if radio_check !='Male-Female':
             st.session_state['modified_data']=fourier.irfft(st.session_state['fourierValues'],n=st.session_state['FileLength'])
         if pygame.mixer.get_init() is not None:
             pygame.mixer.quit()
+
+        st.session_state['paused']=False  
         soundfile.write('tem1.wav', st.session_state['modified_data'],st.session_state['sampleRate'], subtype='PCM_16')
         st.session_state['modified_wav_file'] ='tem1.wav'
 
@@ -231,25 +270,42 @@ def spectrogram(data):
     plt.show()
     return fig 
 
+
 def drawSpectro(data,title,):
         if spectroCheckBox:
             fig =spectrogram(data)
             plt.title(title, 
-                fontsize = 14, fontweight ='bold')
-            fig_html = mpld3.fig_to_html(fig)
-            components.html(fig_html,height=300)
+                fontsize = 8, fontweight ='bold')
+            st.pyplot(fig)   
+            # fig_html = mpld3.fig_to_html(fig)
+            # components.html(fig_html,height=200)
+        else:
+            time=st.session_state.time
+            fig=plt.figure(figsize=(10,2))
+            plt.plot(time,data)
+            plt.title(title, 
+                fontsize = 8, fontweight ='bold')
+            st.pyplot(fig)
+            # fig_html=mpld3.fig_to_html(fig)
+            # components.html(fig_html,height=200,width=400)
+
 
 def sound_mode():
     play_buttons()
     
     leftUpColumns,rightUpColumns=st.columns(2)
     with leftUpColumns:
-        drawSpectro(st.session_state.dataArray,title='RealSignal')
+        drawSpectro(st.session_state.dataArray,title='Original Signal')
     
     make_sliders()
 
     if Apply: #sidebar
         apply_action()
+
+    if st.session_state['play_original']: #sidebar
+        if pygame.mixer.get_init() is not None:
+            pygame.mixer.quit()
+        st.session_state['paused']=False    
     with rightUpColumns:
         drawSpectro(st.session_state.modified_data,title='Modified Signal')
 
@@ -283,8 +339,9 @@ def medical_mode():
         draw_medical_signal(modifiedData,'Modified Signal')    
 
 def main():
-    global file,radio_check
+    global file,radio_check,spectroCheckBox,play_original
     file= st.sidebar.file_uploader("Upload your file",type={"csv",".wav"}, on_change=add_new_uploaded_file,key='uploadedFileCheck')
+    spectroCheckBox=st.sidebar.checkbox('Spectrogram')
     radio_check= st.sidebar.radio("choose:",("Frequency","Vowels_Frequency","Music_Instruments",'Male-Female'))
     if file is not None:
         if file.type =='audio/wav':
