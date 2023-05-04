@@ -1,4 +1,4 @@
-# Equalizer
+# Equalizer Website
 <p align="center">
     <img src="https://user-images.githubusercontent.com/87495750/203169343-46e70350-b5da-4200-b2dd-f45e218915a4.gif"> 
     
